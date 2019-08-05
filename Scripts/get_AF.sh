@@ -1,8 +1,8 @@
 #!/bin/bash
 
-vcftools --gzvcf ALU.vcf.gz --keep parents_dddp.unaffected.txt --freq --out ALU.bait --mac 1 --bed masks/ddd_accessible_genome.sorted.bed
-vcftools --gzvcf LINE1.vcf.gz --keep parents_dddp.unaffected.txt --freq --out LINE1.bait --mac 1 --bed masks/ddd_accessible_genome.sorted.bed
-vcftools --gzvcf SVA.vcf.gz --keep parents_dddp.unaffected.txt --freq --out SVA.bait --mac 1 --bed masks/ddd_accessible_genome.sorted.bed
+vcftools --gzvcf ALU.vcf.gz --keep parents_dddp.unaffected.txt --bed ALU.pli.acc.txt --freq --out SVA.bait
+vcftools --gzvcf LINE1.vcf.gz --keep parents_dddp.unaffected.txt --bed LINE1.pli.acc.txt --freq --out SVA.bait
+vcftools --gzvcf SVA.vcf.gz --keep parents_dddp.unaffected.txt --bed SVA.pli.acc.txt --freq --out SVA.bait
 
 sed -i /CHROM/d ALU.bait.frq
 sed -i /CHROM/d LINE1.bait.frq
