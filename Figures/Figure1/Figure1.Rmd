@@ -1,0 +1,313 @@
+---
+title: "Figure 1"
+output: html_document
+---
+
+* This code makes all input figures for Figure 1 of Gardner et. al. Controbution of Retrotransposition to Developmental Disorders (2019)
+* All Figures need some cleaning up and processing in Illustrator
+* There are 2 versions of the data in Fig1. One for MEIs outside of bait regions, and the other for MEIs within bait regions. The main text figures are here, for the others (including supplemental figures 3 & 11) go to the supplement
+* All individuals have been deidentified to a 5 digit integer and are not linkable to the EGA accession information.
+
+# Startup
+
+Load neccessary libraries for this notebook to work and setup basic stuff:
+
+* default graphpad-like theme
+* colour palette which includes MEI colours in order: Alu, L1, SVA, PPG, All
+
+```{r setup, include=FALSE, message=FALSE, warning=FALSE}
+
+##Libraries
+library(ggplot2)
+library(data.table)
+library(cowplot)
+library(dplyr)
+library(tidyr)
+
+## My default Graphpad-like theme adjusted to Cowplot
+theme<-theme_cowplot(font_size=10,line_size = 1) + theme(panel.background=element_rect(fill="white"),line=element_line(size=1,colour="black",lineend="round"),axis.line=element_line(size=1),text=element_text(size=10,face="bold",colour="black"),axis.text=element_text(colour="black"),axis.ticks=element_line(size=1,colour="black"),axis.ticks.length=unit(.1,"cm"),strip.background=element_blank(),legend.position="null",axis.text.x=element_text(angle=45,hjust=1))
+
+## ALU, LINE1, SVA, ALL colour palette
+cPalette <- c("#7DA1D4","#BEDE85","#DCB070","#EAAAB0","#999999")
+```
+
+# Allele count plot for figures 1A-E
+
+Example script (need to make path changes) to generate MEI files necessary for this project at :
+`scripts/get_indivTotals.sh`
+
+* This script runs code like: `vcftools --gzvcf $MEI.vcf.gz --keep parents_dddp.unaffected.txt --out $MEI.tot --mac 1 --recode --recode-INFO-all`
+* Files generated are:
+    * \<MEI_NAME\>.frq
+    
+Also have code at the bottom which prints the averages from Table 1.
+
+```{r Per Individual Plot, fig.height=2, fig.width=8, message=FALSE, warning=FALSE}
+##Import all files
+ALU_totals <- fread("RawData/ALU.totals.di.txt")
+setnames(ALU_totals,names(ALU_totals),c("ID","Alu","Alu.nc"))
+ALU_totals[,Alu.nc:=NULL]
+LINE1_totals <- fread("RawData/LINE1.totals.di.txt")
+setnames(LINE1_totals,names(LINE1_totals),c("ID","L1","L1.nc"))
+LINE1_totals[,L1.nc:=NULL]
+SVA_totals <- fread("RawData/SVA.totals.di.txt")
+setnames(SVA_totals,names(SVA_totals),c("ID","SVA","SVA.nc"))
+SVA_totals[,SVA.nc:=NULL]
+
+## Grab pseudogene information in order to add them to all figures
+pseudo_calls <- fread("RawData/Retrogenes.di.txt")
+
+## Get individual IDs from pseudogene vcf and count how many sites per individual and remove dupe individuals
+RETROGENE_totals<-data.table(ID=names(pseudo_calls[,5:ncol(pseudo_calls)]),"PPGs"=colSums(pseudo_calls[,5:ncol(pseudo_calls)]))
+RETROGENE_totals[,ID:=as.integer(ID)]
+
+## Set any site with greater than 15 sites to NA
+fix.outlier<-function(x) {
+  if(x <= 15) {
+    return(x)
+  } else {
+    return(NA)
+  }
+}
+
+RETROGENE_totals[,PPGs:=mapply(fix.outlier,PPGs)]
+
+strsplit.mod<-function(x,y) {
+  z<-strsplit(x,y)
+  return(z[[1]][2])
+}
+
+## Build totals across all 4 RT classes for parents only
+totals <- merge(ALU_totals,LINE1_totals,by="ID")
+totals <- merge(totals,SVA_totals,by="ID")
+totals <- merge(totals,RETROGENE_totals,by="ID")
+totals <- totals[,Total:=rowSums(totals[,2:5],na.rm = T)]
+totals <- totals[,Total.MEI:=rowSums(totals[,2:4],na.rm = T)]
+
+totals <- data.table(gather(totals,"mei","total",-ID))
+totals[,mei:=factor(totals[,mei],levels=c("Alu","L1","SVA","PPGs","Total","Total.MEI"))]
+
+## Make each plot individually
+plot.alu.totals <- ggplot(totals[mei=="Alu"],aes(total,fill=mei)) + scale_fill_manual(values=cPalette[1]) + geom_histogram(binwidth=1,colour="black",size=0.25) + xlab(NULL) + ylab(NULL) + scale_y_continuous(expand=c(0,0)) + ggtitle(expression(bolditalic("Alu"))) + theme
+
+plot.l1.totals <- ggplot(totals[mei=="L1"],aes(total,fill=mei)) + scale_fill_manual(values=cPalette[2]) + geom_histogram(binwidth=1,colour="black",size=0.25) + xlab(NULL) + ylab(NULL) + scale_y_continuous(expand=c(0,0)) + scale_x_continuous(breaks = c(0,5,10)) + ggtitle(expression(bold("L1"))) + theme
+
+plot.sva.totals <- ggplot(totals[mei=="SVA"],aes(total,fill=mei)) + scale_fill_manual(values=cPalette[3]) + geom_histogram(binwidth=1,colour="black",size=0.25) + xlab("Ascertained MEIs / Individual Exome") + ylab(NULL) + scale_y_continuous(expand=c(0,0)) + ggtitle(expression(bold("SVA"))) + theme
+
+plot.ppg.totals <- ggplot(totals[mei=="PPGs"],aes(total,fill=mei)) + scale_fill_manual(values=cPalette[4]) + geom_histogram(binwidth=1,colour="black",size=0.25) + xlab(NULL) + ylab(NULL) + scale_y_continuous(expand=c(0,0)) + ggtitle(expression(bold("PPGs"))) + theme
+
+plot.total.totals <- ggplot(totals[mei=="Total"],aes(total,fill=mei)) + scale_fill_manual(values=cPalette[5]) + geom_histogram(binwidth=1,colour="black",size=0.25) + xlab(NULL) + ylab(NULL) + scale_y_continuous(expand=c(0,0)) + ggtitle(expression(bold("Total"))) + theme
+
+figure1.top <- plot_grid(plot.alu.totals,plot.l1.totals,plot.sva.totals,plot.ppg.totals,plot.total.totals,ncol=5,nrow=1,align = 'vh', labels = c("a","b", "c", "d", "e"))
+figure1.top
+
+## This prints averages from Table 1:
+totals[,list(mean(total,na.rm = T),sd(total, na.rm=T)),by="mei"]
+```
+
+# Allele frequency plot for figure 1F
+
+Example script (need to make path changes) to generate MEI files necessary for this project at :
+`scripts/get_indivTotals.sh`
+
+* To generate input files, code like: vcftools --gzvcf ALU.vcf.gz --keep parents_dddp.unaffected.txt --freq --out ALU --mac 1
+* Files generated are:
+    * \<MEI_NAME\>.frq
+
+```{r Allele Freq Plot, fig.height=3, fig.width=5, message=FALSE, warning=FALSE}
+##Import all files
+ALU <- fread("RawData/ALU.frq")
+LINE1 <- fread("RawData/LINE1.frq")
+SVA <- fread("RawData/SVA.frq")
+
+## Get individual IDs and Genes from pseudogene vcf and count how many sites per individual/retrogene
+RETROGENE <- data.table(geneid=pseudo_calls[,GENE],N=rowSums(pseudo_calls[,5:ncol(pseudo_calls)]))
+total_indv<-ncol(pseudo_calls) - 4 ## minus 4 because of info columns
+RETROGENE[,af:=N/total_indv]
+RETROGENE[,af.cut:=cut(af,breaks= c(0.00001,0.0001,0.001,0.01,0.1,1))]
+
+ALU[,ac:=apply(ALU,1,function(x) {v<-strsplit(x[6],":",fixed=TRUE);x<-round(as.numeric(v[[1]][4])*as.numeric(x[4]));if(x > 25) {25} else {x}})]
+ALU[,af:=apply(ALU,1,function(x) {v<-strsplit(x[6],":",fixed=TRUE);as.numeric(v[[1]][4])})]
+ALU[,af.cut:=cut(af,breaks= c(0.00001,0.0001,0.001,0.01,0.1,1))]
+
+LINE1[,ac:=apply(LINE1,1,function(x) {v<-strsplit(x[6],":",fixed=TRUE);x<-round(as.numeric(v[[1]][4])*as.numeric(x[4]));if(x > 25) {25} else {x}})]
+LINE1[,af:=apply(LINE1,1,function(x) {v<-strsplit(x[6],":",fixed=TRUE);as.numeric(v[[1]][4])})]
+LINE1[,af.cut:=cut(af,breaks= c(0.00001,0.0001,0.001,0.01,0.1,1))]
+
+SVA[,ac:=apply(SVA,1,function(x) {v<-strsplit(x[6],":",fixed=TRUE);x<-round(as.numeric(v[[1]][4])*as.numeric(x[4]));if(x > 25) {25} else {x}})]
+SVA[,af:=apply(SVA,1,function(x) {v<-strsplit(x[6],":",fixed=TRUE);as.numeric(v[[1]][4])})]
+SVA[,af.cut:=cut(af,breaks= c(0.00001,0.0001,0.001,0.01,0.1,1))]
+
+ac <- bind_rows(ALU,LINE1,SVA)
+
+##Get AF Bins
+bins <- data.table(data.table(table(ALU[,af.cut]))[,1])
+bins[,ALU:=data.table(table(ALU[,af.cut]))[,2]]
+bins[,LINE1:=data.table(table(LINE1[,af.cut]))[,2]]
+bins[,SVA:=data.table(table(SVA[,af.cut]))[,2]]
+bins[,Retrogene:=data.table(table(RETROGENE[,af.cut]))[,2]]
+bins[,Total:=apply(bins,1,function(x){as.numeric(x[2])+as.numeric(x[3])+as.numeric(x[4])+as.numeric(x[5])})]
+
+bins<-data.table(bins=c(bins[,V1],bins[,V1],bins[,V1],bins[,V1],bins[,V1]),
+                 counts=c(bins[,ALU],bins[,LINE1],bins[,SVA],bins[,Retrogene],bins[,Total]),
+                 MEI=c(rep("ALU",5),rep("LINE1",5),rep("SVA",5),rep("Retrogenes",5),rep("Total",5)))
+bins[,pct:=counts/sum(counts),by=MEI]
+bins<-data.frame(bins)
+bins$MEI2<-factor(bins$MEI,levels=c("ALU","LINE1","SVA","Retrogenes","Total"))
+bins$bins2<-factor(bins$bins,levels=c("(1e-05,0.0001]","(0.0001,0.001]","(0.001,0.01]","(0.01,0.1]","(0.1,1]"))
+bins<-data.table(bins)
+
+plot.af<-ggplot(bins,aes(bins2,pct,group=MEI2,fill=MEI2)) + scale_fill_manual(values=cPalette) + geom_col(position=position_dodge(width=0.85), width=0.85, colour="black", size=0.5) + scale_x_discrete(labels=c("0.00001","0.0001","0.001","0.01","0.1")) + scale_y_continuous(expand=c(0,0),breaks=c(0,0.2,0.4,0.6)) + theme + xlab("Allele Frequency Bins") + ylab("Percent of All Sites")
+plot.af
+```
+
+## Figure 1a-e with Poisson distributions
+
+Plots with the Poisson dist. overlayed over each MEI in order Alu, L1, SVA, PPG, Total
+
+These are included as Supplemental Figure 3
+
+```{R Poisson distribution, fig.height=2, fig.width=8, message=FALSE, warning=FALSE}
+
+#This code will plot Poisson distribution over each histogram.
+mei.types<-c("Alu","L1","SVA","PPGs","Total")
+plot.table<-data.table(mei=mei.types,colour=c(1:5))
+
+draw.graph <- function(current.mei,num) {
+
+  mean.mei <- totals[mei==current.mei,mean(total,na.rm=T)]
+  total.samples <- length(unique(totals[,ID]))
+  max <- max(totals[mei==current.mei,total],na.rm = T)
+
+  # This is a random Poisson deviate to plot alongside the main figures.
+  pois.hist <- data.table(rpois(total.samples,lambda=mean.mei))
+  
+  plot <- ggplot(totals[mei==current.mei]) + 
+    geom_histogram(aes(x=total),fill=cPalette[num],colour="black",size=0.25,binwidth=1, center = 1) +
+    scale_y_continuous(expand=c(0,0), name = NULL) + 
+    xlab("Total Sites") + 
+    stat_bin(inherit.aes=F,data=pois.hist,aes(V1),geom="point",size=1,colour="blue",binwidth=1) +
+    ggtitle(current.mei) +
+    theme
+  return(list(list(plot)))
+
+}
+plot.table[,graph:=draw.graph(mei,colour),by=mei]
+
+figure.poisson <- plot_grid(plot.table[mei=="Alu",graph][[1]],
+                            plot.table[mei=="L1",graph][[1]],
+                            plot.table[mei=="SVA",graph][[1]],
+                            plot.table[mei=="PPGs",graph][[1]],
+                            plot.table[mei=="Total",graph][[1]],
+                            ncol=5,nrow=1,align = 'vh', labels = c("a","b", "c", "d", "e"))
+figure.poisson
+```
+
+# Length Plot for Figure1G
+
+Example script (need to make path changes) to generate MEI files necessary for this project at :
+`scripts/get_len.sh`
+
+* Data for the supplied text files runs code like: `bcftools query $MEI.tot.recode.vcf.gz -f "%SVLEN\n" | grep -v "\-1" > $MEI.len`
+* Variants are pulled from the VCF file using VCF tools and then processed using BCFTools
+* Files generated are:
+    * \<MEI_NAME\>.len
+
+```{r Length Plot, fig.height=3, fig.width=5, message=FALSE, warning=FALSE}
+##Import all files
+##Generated by (obviously change for MEI type):
+ALU_len <- fread("RawData/ALU.len")
+ALU_len[,mei:="ALU"]
+LINE1_len <- fread("RawData/LINE1.len")
+LINE1_len[,mei:="LINE1"]
+SVA_len <- fread("RawData/SVA.len")
+SVA_len[,mei:="SVA"]
+
+histo <- bind_rows(ALU_len,LINE1_len,SVA_len)
+setnames(histo,"V1","lens")
+
+## This is just here to check the proportion of FL-L1s. Print the table "test" if you want to see the raw percentages per-bin.
+LINE1_len[,len.cut:=cut(V1,breaks= c(1:1204)*5)]
+test<-data.table(table(LINE1_len[,len.cut]))
+test[,len.pct:=N/sum(N)]
+
+plot.len<-ggplot(histo,aes(lens,group=mei,colour=mei)) + scale_colour_manual(values=cPalette) + geom_freqpoly(size=1.5,bins=60) + scale_x_log10(breaks=c(100,1000,10000),limits=c(50,10000)) + scale_y_log10(expand=c(0,0),breaks=c(2,20,200)) + theme + xlab("Insert Length") + ylab("Ascertained MEIs")
+plot.len
+```
+
+## Allele count plot for bait regions
+
+This figure is in the paper as Supplemental Fig. 11. It displayes the allele frequency distribution for RT events and SNVs only in the accesibility mask regions as described in the paper methods.
+
+See `Figure2.rmd` and paper methods for more details on how QC'd SNV calls are made.
+
+```{r Allele Count Plot-Baits, fig.height=4, fig.width=8, message=FALSE, warning=FALSE}
+## Add SNV colour to cPalette
+cPalette.snv <- c("#000000", cPalette)
+
+##Import all files
+ALU <- fread("RawData/ALU.bait.frq")
+LINE1 <- fread("RawData/LINE1.bait.frq")
+SVA <- fread("RawData/SVA.bait.frq")
+SNP <- fread("RawData/SNV.frq")
+setnames(SNP,names(SNP),"af")
+
+## Get individual IDs and Genes from pseudogene vcf and count how many sites per individual/retrogene
+RETROGENE <- data.table(geneid=pseudo_calls[,GENE],N=rowSums(pseudo_calls[,5:ncol(pseudo_calls)]))
+total_indv<-ncol(pseudo_calls) - 4 ## minus 4 because of info columns
+RETROGENE[,af:=N/total_indv]
+RETROGENE[,af.cut:=cut(af,breaks= c(0.00001,0.0001,0.001,0.01,0.1,1))]
+
+ALU[,ac:=apply(ALU,1,function(x) {v<-strsplit(x[6],":",fixed=TRUE);x<-round(as.numeric(v[[1]][4])*as.numeric(x[4]));if(x > 25) {25} else {x}})]
+ALU[,af:=apply(ALU,1,function(x) {v<-strsplit(x[6],":",fixed=TRUE);as.numeric(v[[1]][4])})]
+ALU[,af.cut:=cut(af,breaks= c(0.00001,0.0001,0.001,0.01,0.1,1))]
+
+LINE1[,ac:=apply(LINE1,1,function(x) {v<-strsplit(x[6],":",fixed=TRUE);x<-round(as.numeric(v[[1]][4])*as.numeric(x[4]));if(x > 25) {25} else {x}})]
+LINE1[,af:=apply(LINE1,1,function(x) {v<-strsplit(x[6],":",fixed=TRUE);as.numeric(v[[1]][4])})]
+LINE1[,af.cut:=cut(af,breaks= c(0.00001,0.0001,0.001,0.01,0.1,1))]
+
+SVA[,ac:=apply(SVA,1,function(x) {v<-strsplit(x[6],":",fixed=TRUE);x<-round(as.numeric(v[[1]][4])*as.numeric(x[4]));if(x > 25) {25} else {x}})]
+SVA[,af:=apply(SVA,1,function(x) {v<-strsplit(x[6],":",fixed=TRUE);as.numeric(v[[1]][4])})]
+SVA[,af.cut:=cut(af,breaks= c(0.00001,0.0001,0.001,0.01,0.1,1))]
+
+SNP[,af.cut:=cut(af,breaks= c(0.00001,0.0001,0.001,0.01,0.1,1))]
+
+ac<-data.frame(ac=c(ALU[,ac],LINE1[,ac],SVA[,ac]),mei=c(rep("Alu",nrow(ALU)),rep("LINE-1",nrow(LINE1)),rep("SVA",nrow(SVA))))
+
+##Get AF Bins
+bins <- data.table(data.table(table(ALU[,af.cut]))[,1])
+bins[,ALU:=data.table(table(ALU[,af.cut]))[,2]]
+bins[,LINE1:=data.table(table(LINE1[,af.cut]))[,2]]
+bins[,SVA:=data.table(table(SVA[,af.cut]))[,2]]
+bins[,Retrogene:=data.table(table(RETROGENE[,af.cut]))[,2]]
+bins[,Total:=apply(bins,1,function(x){as.numeric(x[2])+as.numeric(x[3])+as.numeric(x[4])+as.numeric(x[5])})]
+bins[,SNP:=data.table(table(SNP[,af.cut]))[,2]]
+
+bins<-data.table(bins=c(bins[,V1],bins[,V1],bins[,V1],bins[,V1],bins[,V1],bins[,V1]),
+                 counts=c(bins[,ALU],bins[,LINE1],bins[,SVA],bins[,Retrogene],bins[,Total],bins[,SNP]),
+                 MEI=c(rep("ALU",5),rep("LINE1",5),rep("SVA",5),rep("Retrogenes",5),rep("Total",5),rep("SNV",5)))
+bins[,pct:=counts/sum(counts),by=MEI]
+
+bins[,Variant:=factor(MEI,levels=c("SNV","ALU","LINE1","SVA","Retrogenes","Total"))]
+bins[,bins:=factor(bins,levels=c("(1e-05,0.0001]","(0.0001,0.001]","(0.001,0.01]","(0.01,0.1]","(0.1,1]"))]
+
+
+theme<-theme+theme(legend.position="right")
+plot <- ggplot(bins,aes(bins,pct,group=Variant,fill=Variant)) + scale_fill_manual(values=cPalette.snv) + geom_col(position=position_dodge(width=0.85), width=0.85, colour="black", size=0.5) + scale_x_discrete(labels=c("0.00001","0.0001","0.001","0.01","0.1")) + scale_y_continuous(expand=c(0,0),breaks=c(0,0.2,0.4,0.6,0.8),limits=c(0,0.8)) + theme + xlab("Allele Frequency Bins") + ylab("Percent of All Sites")
+
+plot
+```
+
+# Draw Figure 1
+
+This blob draws figure 1 nicely aligned with cowplot. This still needs a bit of adjustment before can be considered publication ready:
+
+* figure labels are a bit off
+* need to add y-axis title to panel 'a'
+* Still not aligning f and a — unsure if there is a way to fix
+
+```{r Figure 1, message=FALSE, warning=FALSE}
+figure1.bot <- plot_grid(plot.af,plot.len,ncol=2,nrow=1,align = 'vh', labels = c("f","g"))
+figure1 <- plot_grid(figure1.top,figure1.bot,ncol=1,nrow=2,align='vh')
+figure1
+```

@@ -1,0 +1,269 @@
+---
+title: "MEI Mutation Rate, Enrichment, and Figure 4"
+output: html_document
+---
+
+* This code makes all input figures for Figure 4 of Gardner et. al. Controbution of Retrotransposition to Developmental Disorders (2018)
+* All Figures need some cleaning up and processing in Illustrator
+* All files/code are located in: `/Users/eg15/Documents/Current Projects/DDD/Manuscript/Figures/Figure2/`
+
+Load all libraries necessary for this notebook to work and setup basic stuff:
+
+* libraries
+* default graphpad-like theme
+* function for calculating confidence intervals
+
+```{r setup, message=FALSE, warning=FALSE, include=FALSE}
+##Libraries
+library(readr)
+library(ggplot2)
+library(data.table)
+library(cowplot)
+
+## My default Graphpad-like theme
+theme<-theme_cowplot(font_size=10,line_size = 1) + theme(panel.background=element_rect(fill="white"),line=element_line(size=1,colour="black",lineend="round"),axis.line=element_line(size=1),text=element_text(size=10,face="bold",colour="black"),axis.text=element_text(colour="black"),axis.ticks=element_line(size=1,colour="black"),axis.ticks.length=unit(.1,"cm"),strip.background=element_blank(),legend.position="null",axis.text.x=element_text(angle=45,hjust=1))
+
+## Empty plot to squish the figure together
+empty <- ggplot() + geom_point(aes(1,1), colour="white") + theme(axis.ticks=element_blank(), panel.background=element_blank(), axis.text.x=element_blank(), axis.text.y=element_blank(), axis.title.x=element_blank(), axis.title.y=element_blank(),axis.line=element_blank())
+
+##Calculate CI function for poisson distribution:
+calc.ci<-function(n,lambda) {
+  return(1.96*sqrt(lambda))
+}
+```
+
+# Mutation rate calculation
+
+Code will generate the total number of variants that we expect in *n* individuals based on mutation rates calculated from the waterson estimator presented in Table 2 of the main text. Numbers for input into the Watterson estimator/mutation rate calculator are generated seperately for the DDD and 1KGP.
+
+## Accessibility Masks
+
+### DDD Accessible Genome
+
+See methods in paper for how the mask was generated. A copy is available in `Masks/`
+
+### 1KGP MEI Mask
+
+The 1KGP accessible genome was generated in the follow steps:
+
+1. Downloaded the pilot 1KGP mask `20140520.pilotmask_autosomes.bed` from the 1KGP FTP site.
+2. Merge with ALU and L1.bed seperately and then sorted with `bedtools sort` to generate a file of regions we do not want to calculate from (ref MEIs and protein coding genes). 
+3. Invert these coordinates using `bedtools complement -i <MASK> -g hs37d5.fa.fai` to generate the 1KGP mask. 
+4. 1KGP MEI VCF files are then intersected with the bed files generated from Gardner et. al. VCF files:
+
+`bedtools intersect -a ALU.vcf.bed -b ALU_mask.sorted.bed`
+
+To generate the numbers seen below. ALU mask was used for SVA.
+
+## Expected site calculation
+
+Totals here are taken from total.DDD and total.1KGP (except for the harmonic number) and are inserted into Supplemental Table 3.
+
+Values for expected sites are generated simply by running a bcftools command similar to:
+
+`bcftools view -H -c 1 --force-samples -R Masks/ddd_accessible_genome.sorted.bed -S parents_dddp.unaffected.txt ALU.vcf.gz | wc -l`
+
+These numbers are also identical to the file length counts for Figure2 files `Figure2/RawData/<MEI>.pli.acc.txt`
+
+```{r Calc expected number of mutations}
+
+total.DDD<-data.table(MEI=c("ALU","L1","SVA"),counts=c(653,107,30),haps=rep(34064,3),eff.pop.size=rep(10000,3),g.size=rep(74215199,3))
+total.1KGP<-data.table(MEI=c("ALU","L1","SVA"),counts=c(8554,2047,329),haps=rep(4906,3),eff.pop.size=rep(10000,3),g.size=c(1113038813,959856610,959856610))
+
+##Calculate harmonic number function (this already does the -1 required)
+harm.number <- function(alleles) {
+  x<-0
+  for (i in 1:(alleles-1)) {
+    z <- i
+    y <- 1/z
+    x <- x+y
+  }
+  x
+}
+
+total.DDD[,harm.number:=mapply(harm.number,haps)]
+total.1KGP[,harm.number:=mapply(harm.number,haps)]
+
+total.DDD[,theta:=counts/harm.number]
+total.1KGP[,theta:=counts/harm.number]
+
+total.DDD[,u.genome:=theta/(4*eff.pop.size)]
+total.1KGP[,u.genome:=theta/(4*eff.pop.size)]
+
+total.DDD[,u:=u.genome/(g.size*2)]
+total.1KGP[,u:=u.genome/(g.size*2)]
+
+calc.counts<-function(mutation.rate, n) {
+  
+  denovo.rate <- 1/(mutation.rate*(2876892038*2))
+  print(paste("de novo MEI every",sprintf("%0.3f",denovo.rate),"births",sep=" "))
+  expected.denovo.ddd <- n/denovo.rate
+  print(paste("expect", sprintf("%0.3f",expected.denovo.ddd),"de novos in",n, "individuals",sep=" "))
+  
+}
+paste("Using DDD Mutation rate of:", sprintf("%.2e",total.DDD[,sum(u)]))
+DDD.counts<-calc.counts(total.DDD[,sum(u)],9738)
+paste("Using 1KGP Mutation rate of:",sprintf("%.2e",total.1KGP[,sum(u)]))
+KGP.counts<-calc.counts(total.1KGP[,sum(u)],9738)
+
+## prints the data used for Supplemental Table 3
+print(total.DDD)
+print(total.1KGP)
+```
+
+# Enrichment of Deleterious MEIs for Fig4
+
+This code uses the simulation data contained in the final file `RawData/de_novo.test.txt` to determine total number of expected sites within exons, enhancers, and introns. The code generates 100 simulations in 4 steps. There is a shell script `random.sh` on the farm in this folder whicch automates all four steps:
+
+1. Generate a random set of 677 sites of length 1 in the genome using `bedtools random -l 1 -seed <ITR #> -n 677` where
+    * -l is the length of the sites (1)
+    * -seed is the random number generator seed, which is always equal to the job number (1-100) on the farm
+    * -n is the number of sites to generate (from code chunk above)
+2. Then used VEP to annotate all of these calls the same as in Fig 2b.
+3. Parse VEP identically to Fig 2b.
+4. Sum all of the VEP output and cat it together into the file `RawData/de_novo.test.txt` which is then provided as input below (see column names below for annotation categories)
+
+Input for the MEI data provided as the data.table `data.mutations.sum` is provided manually from my own confirmed de novos across exon, enhancer, intron
+
+```{r Mutation Rate, warning=FALSE,message=FALSE}
+
+##Load simulation data
+sim_data <- fread("RawData/de_novo.test.txt")
+setnames(sim_data,names(sim_data),c("exon","exon.pli","exon.ddg2p","intron","intron.pli","intron.ddg2p","enhancer","total"))
+
+##Load MEI data
+data.mutations.sum <- data.table(means=c(mean(sim_data[,exon]),mean(sim_data[,exon.pli]),mean(sim_data[,exon.ddg2p]),6,4,4,mean(sim_data[,intron]),mean(sim_data[,intron.pli]),mean(sim_data[,intron.ddg2p]),3,0,0,mean(sim_data[,enhancer]),0),
+                                 ci=c(calc.ci(nrow(sim_data),mean(sim_data[,exon])),calc.ci(nrow(sim_data),mean(sim_data[,exon.pli])),calc.ci(nrow(sim_data),mean(sim_data[,exon.ddg2p])),0,0,0,calc.ci(nrow(sim_data),mean(sim_data[,intron])),calc.ci(nrow(sim_data),mean(sim_data[,intron.pli])),calc.ci(nrow(sim_data),mean(sim_data[,intron.ddg2p])),0,0,0,calc.ci(nrow(sim_data),mean(sim_data[,enhancer])),0),
+                                 category=c("All","High pLI","MA DDG2P","All","High pLI","MA DDG2P","All","High pLI","MA DDG2P","All","High pLI","MA DDG2P","All","All"),
+                                 region=c(rep("Exon",6),rep("Intron",6),rep("Enhancer",2)),
+                                 dataset=c(rep("sim",3),rep("real",3),rep("sim",3),rep("real",3),rep("sim",1),rep("real",1)))
+
+## MA = Monoallelic
+data.mutations.sum[,category:=factor(category,levels=c("MA DDG2P","High pLI","All"))]
+data.mutations.sum[,ci.low:=means-ci]
+data.mutations.sum[,ci.high:=means+ci]
+
+##Exon
+#Calculate pvalus from the Poisson distribution
+#The paste part of the code just formats to the right decimal point if necessary
+p.vals<-c()
+for (y in c("All","High pLI","MA DDG2P")) {
+    
+  if (data.mutations.sum[region=="Exon"][category==y][dataset=="real"][,means] < data.mutations.sum[region=="Exon"][category==y][dataset=="sim"][,means]) {
+    val<-ppois(data.mutations.sum[region=="Exon"][category==y][dataset=="real"][,means],data.mutations.sum[region=="Exon"][category==y][dataset=="sim"][,means])
+  } else {
+    val<-ppois(data.mutations.sum[region=="Exon"][category==y][dataset=="real"][,means],data.mutations.sum[region=="Exon"][category==y][dataset=="sim"][,means],lower.tail=FALSE)
+  }
+  if (val < 0.01) {
+    val<-paste("P = ",sprintf("%.2e",val),sep="")
+  } else {
+    val<-paste("P = ",sprintf("%.2f",val),sep="")
+  }
+
+  p.vals<-c(p.vals,val)
+  
+}
+p.vals<-data.frame(val=p.vals,category=c("All","High pLI","MA DDG2P"),means=c(13.5,13.5,13.5))
+
+plot.exon<-ggplot(data.mutations.sum[region=="Exon"][dataset=="sim"],aes(means,category),colour="black") + 
+  geom_point(size=5,shape=18) + 
+  geom_errorbarh(aes(xmin=ci.low,xmax=ci.high),size=1,height=0) + 
+  geom_point(data=data.mutations.sum[region=="Exon"][dataset=="real"],inherit.aes=F,aes(means,category),colour="red",size=5,shape=18) + 
+  ylab("Functional Category") + 
+  geom_text(data=p.vals,inherit.aes=F,aes(means,category,label=val),size=4,hjust=0) + 
+  scale_x_continuous(limits = c(-1,15.5),breaks=c(0,5,10,15), name = "Total de novo mutations") + 
+  theme
+plot.exon
+
+##Enhancer
+#Calculate poisson distributions
+#The enhancer plot includes all three categories (all, enhancer, MA DDG2P but only prints in all to keep plot sizing the same)
+if (data.mutations.sum[region=="Exon"][category==y][dataset=="real"][,means] < data.mutations.sum[region=="Exon"][category==y][dataset=="sim"][,means]) {
+  val<-ppois(data.mutations.sum[region=="Enhancer"][category=="All"][dataset=="real"][,means],data.mutations.sum[region=="Enhancer"][category=="All"][dataset=="sim"][,means])
+} else {
+  val<-ppois(data.mutations.sum[region=="Enhancer"][category=="All"][dataset=="real"][,means],data.mutations.sum[region=="Enhancer"][category=="All"][dataset=="sim"][,means],lower.tail=FALSE)
+}
+if (val < 0.01) {
+  val<-paste("P = ",sprintf("%.2e",val),sep="")
+} else {
+  val<-paste("P = ",sprintf("%.2f",val),sep="")
+}
+p.vals<-data.table(val=c(val,"",""),category=factor(c("All","High pLI","MA DDG2P"),levels=c("High pLI","MA DDG2P","All")),means=c(13.5,13.5,13.5))
+
+plot.enh<-ggplot(data.mutations.sum[region=="Enhancer" & dataset=="sim" & category == "All"],aes(means,category),colour="black") +
+  geom_point(size=5,shape=18) + 
+  geom_errorbarh(aes(xmin=ci.low,xmax=ci.high),size=1,height=0) +
+  geom_point(data=data.mutations.sum[region=="Enhancer" & dataset=="real" & category == "All"],inherit.aes=F,aes(means,category),colour="red",size=5,shape=18) +
+  ylab("Functional Category") +
+  geom_text(data=p.vals[category=="All"],inherit.aes=F,aes(means,category,label=val),size=4,hjust=0) +
+  scale_x_continuous(limits = c(-1,15.5),breaks=c(0,5,10,15), name = "Total de novo mutations") +
+  theme
+plot.enh
+
+##Introns
+plot.int<-ggplot(data.mutations.sum[region=="Intron"][dataset=="sim"],aes(means,category),colour="black") +
+  geom_point(size=5,shape=18) +
+  geom_errorbarh(aes(xmin=ci.low,xmax=ci.high),size=1,height=0) +
+  geom_point(data=data.mutations.sum[region=="Intron"][dataset=="real"],inherit.aes=F,aes(means,category),colour="red",size=5,shape=18) +
+  ylab("Functional Category") +
+  coord_fixed(ratio=18/1,clip="off") +
+  scale_x_continuous(limits = c(-20,300),breaks=c(0,100,200,300), name = "Total de novo mutations") +
+  theme
+plot.int
+
+```
+
+## Put Figure Together
+
+Still need to edit some things in Illustrator:
+
+* Move the "functional category" label down
+* Add Enhancer/Exonic labels
+* move "a" and "b"
+* Add legend
+
+```{r Figure 4 cowplot, fig.height=3, fig.width=8}
+
+figure4 <- plot_grid(plot.exon,empty,plot.enh,ncol=1,nrow=3,align = 'vh', rel_heights = c(2,-0.35,1), labels = c("a","b"))
+figure4
+
+```
+
+# Probability test for nonsense variants
+
+"Coin Flip" testing based on proportion of the genome that is DDG2P and total number of exonic de novos identified (6). We are testing how often these 6 _de novos_ identified will hit a DDG2P at the same level we observed (4) in the DDD
+
+This test is based off the total number of BPs in the genome which are:
+
+* Entire (accessible) Genome: 74200000
+* Exons: 58608687
+* mono DDG2P exons: 2443208
+
+So, in other words how often, by chance, will 4 out of 6 *de novo* MEIs hit known DDG2P exons. This is included in the section on "Mutation Rate" in the manuscript.
+
+**Note:** Remember, this test will result in a slightly different p value every time it is run, so won't match the number in the paper exactly (should always be in the realm of $10^{-5}$)
+
+```{r Coin Flip for Deleterious Mutations}
+acc.genome <- 74200000
+dd.mono.exons<-2443208
+prob<-(dd.mono.exons/acc.genome)*1000
+test<-data.table(trial=c(1:1000000))
+ran.samp<-function(z) {
+  x<-sample(c(1:1000),6)
+  y<-0
+  for (t in x) {
+    if (t < prob) {
+      y<-y+1
+    }
+  }
+  if (y >= 4) {
+    return(1)
+  } else {
+    return(0)
+  }
+}
+test[,val:=mapply(ran.samp,trial)]
+final.result<-data.table(table(test[,val]))
+p.val<-final.result[V1==1,N]/1000000
+paste("Probability of 6 de novo exonic MEIs intersecting known MA-DD exons 4 times is:", p.val)
+```

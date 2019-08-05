@@ -1,0 +1,295 @@
+---
+title: "Figure 2"
+output: html_document
+---
+
+* This code makes all input figures for Figure 2 of Gardner et. al. Controbution of Retrotransposition to Developmental Disorders (2018)
+* All Figures need some cleaning up and processing in Illustrator
+* All files/code are located in: `/Users/eg15/Documents/Current Projects/DDD/Manuscript/Figures/Figure2/`
+
+Load all libraries necessary for this notebook to work and setup basic stuff:
+
+* libraries
+* default graphpad-like theme
+* function for calculating confidence intervals
+```{r setup, include=FALSE,warning = FALSE, message = FALSE}
+
+##Libraries
+library(ggplot2)
+library(data.table)
+library(cowplot)
+
+## My default Graphpad-like theme adjusted to Cowplot
+theme<-theme_cowplot(font_size=10,line_size = 1) + theme(panel.background=element_rect(fill="white"),line=element_line(size=1,colour="black",lineend="round"),axis.line=element_line(size=1),text=element_text(size=10,face="bold",colour="black"),axis.text=element_text(colour="black"),axis.ticks=element_line(size=1,colour="black"),axis.ticks.length=unit(.1,"cm"),strip.background=element_blank(),legend.position="null",axis.text.x=element_text(angle=45,hjust=1))
+
+##Calculate CIs function
+ci.func <- function(prop,total) {1.96*sqrt(((prop*(1-prop))/total))}
+
+## MEI Colours
+cPalette <- c("#7DA1D4","#BEDE85","#DCB070","#EAAAB0","#999999")
+```
+
+# Genomic Compartment Annotation
+
+* First do an intersect to enhancers, and then remove those sites from the the subsequent file and annotate the rest of the variants
+* Annotates **ALL** variants in the VCF (so not the subset used for 2b) - This means that both affected parents and probands are included in totals.
+* All compartments are calculated independently, for the purposes of the plot I summed the following categories to make the plot cleaner:
+    * UTR
+        * 5' UTR
+        * 3' UTR
+    * Enhancers
+        * Heart
+        * Conserved
+        * VISTA
+* The key seen in the final figure is done completely in Illustrator, so if deleted has to be made again
+
+```{r Annotation Plot, message=FALSE, warning=FALSE}
+
+comps<-c("exon","intron","UTR","enhancer","none")
+
+##Script to generate numbers automatically @ : scripts/annotation.sh
+##Numbers were then added by hand from the output
+annote<-data.table(compartment=rep(comps,3),
+                  count=c(128,545,23,88,133,
+                          31,78,4,24,30,
+                          4,30,0,3,8),
+                  mei=c(rep("Alu",5),rep("L1",5),rep("SVA",5)))
+
+annote[,compartment:=factor(compartment,levels=comps)]
+
+## This just makes the coloured border around each MEI bar.
+## This + 5 was based off of how the figure looks at the width I have it in the final figure. Doesn't mean anything
+fake<-annote[,sum(count)+5,by=mei]
+
+setkey(annote,compartment)
+
+plot.compartment <- ggplot(annote,aes(mei,count,group=compartment,fill=compartment)) + geom_col(size=0,colour="black",width=0.8) + ylab("Total sites") + xlab("") + scale_fill_grey() + scale_x_discrete() + scale_y_continuous(expand=c(0,0),limits = c(0,950)) + geom_col(inherit.aes=F,data=fake,aes(mei,V1-4,colour=mei),alpha=0,size=1,width=0.8) + scale_colour_manual(values=cPalette) + theme + coord_flip()
+
+plot.compartment
+```
+
+## Compare total number of coding variants to 1KGP:
+
+This is in the Supplemental data as Supplemental Figure 7
+
+```{r Compare to 1KGP, fig.height=3, fig.width=8, message=FALSE, warning=FALSE}
+
+cbbPalette <- c("#7DA1D4","#BEDE85","#DCB070")
+
+coding_proportion <- fread("RawData/coding_proportion.txt")
+  
+theme.custom <- theme %+replace% theme(legend.position=c(0.9,0.3))
+  
+ggplot(coding_proportion[MEI!="Total"],aes(Dataset,Count,group=Dataset,fill=MEI)) + scale_fill_manual(values=cbbPalette,labels=c(expression(bolditalic("Alu")),"L1","SVA")) + geom_col(colour="black",size=1.2) + ylab("Total Sites in Exons") + xlab(NULL) + geom_text(data=coding_proportion[MEI=="Total"],inherit.aes=F,aes(Dataset,Count,group=Dataset,label=Count),position=position_nudge(x=0,y=7),fontface="bold",size=5) + coord_flip() + theme.custom
+```
+
+# Generate pLI and Singleton numbers for Figure 2b
+
+## Calculate pLI and Singleton proportion for SNVs
+
+Use bcftools to parse QCd VCF with only unaffected parents:
+
+```{bash Constraint SNV, eval=F}
+
+BCF=$chrom_number
+
+bcftools norm -m -any $BCF.bcf | bcftools view -S parents_unaffected.txt -f PASS | bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\t%AC\t%CSQ\t%AN\n' | perl -ane 'chomp $_; @CSQ = split(",",$F[5]); undef(@printer); for $x (@CSQ) {@curr = split("\\|",$x); if ($curr[0] eq $F[3]) {push(@printer, $x);}} $F[5] = join(",",@printer); print join("\t", @F) . "\n";' | perl -ane 'chomp $_; if ($F[3] ne "*" && $F[4] != 0) {print "$_\n";}' > $BCF.proc
+```
+
+*.proc files are then annotated per consequence and included below in `results.unaffected.txt`. See below for what each column means.
+
+## Calculate pLI and Singleton proportion for MEIs
+
+The below instructions are for filtering and generating numbers for the MEI data
+
+Example script (need to change paths) for this project at :
+`Scripts/get_make_pLI_and_Singleton.sh`
+
+Runs in 2 steps:
+
+1. Extract all VEP annotation from genes with pLI information out of the VEP-annotated MEI VCFs.
+    
+    * Example VEP script to annotate MEIs is:
+    ** Don't need to include LoFtee (and in fact does not do anything) -- just did because of default DDD workflow
+    
+```{bash VEP script, eval=F}
+## Actual VEP script
+perl ensembl-vep-release-88/vep --force_overwrite --check_existing --offline --everything --format vcf --cache --dir ensembl-vep/88/DATA/ --fasta Homo_sapiens.GRCh37.75.dna.primary_assembly.fa --dir_plugins ensembl-vep/PLUGINS/loftee/loftee-master --plugin LoF,human_ancestor_fa:ensembl-vep/PLUGINS/loftee/LOF_human_ancestor/human_ancestor.fa.gz,conservation_file:ensembl-vep/PLUGINS/loftee/phylocsf.sql -i <MEI>.vep.vcf -o <MEI>.vep_annotated.vcf --vcf
+```
+
+2. Calculate allele frequencies seperately for exon and intron MEIs as annotated above using VCF tools like:
+
+`vcftools --gzvcf $MEI.vep_annotated.dupes_indv_removed.vcf.gz --positions <MEI>.intron_sites.txt --out <MEI>.intron --keep parents_dddp.unaffected.txt --non-ref-ac 1 --freq`
+`vcftools --gzvcf $MEI.vep_annotated.dupes_indv_removed.vcf.gz --positions <MEI>.exon_sites.txt --out <MEI>.exon --keep parents_dddp.unaffected.txt --non-ref-ac 1 --freq`
+
+This generates three sets of files:
+
+* <MEI>.pli.acc.txt : used ONLY for pLI scores
+* <MEI>.exon.frq : exon allele frequencies — turned into allele counts below 
+* <MEI>.intron.frq : intron allele frequencies — turned into allele counts below
+
+## Generate Figure
+
+```{r Constraint Plot, echo=FALSE, fig.height=4.5, fig.width=5, message=FALSE, warning=FALSE}
+cPalette <- c("#999999","#7DA1D4","#000000")
+
+## From here I do pLI proportion
+## Read MEI file I prepared
+ALU_pli <- fread("RawData/ALU.pli.acc.txt")
+ALU_pli <- ALU_pli[,c("V2","V6","V8")]
+setnames(ALU_pli,names(ALU_pli),c("pos","pli","status"))
+
+LINE1_pli <- fread("RawData/LINE1.pli.acc.txt")
+LINE1_pli <- LINE1_pli[,c("V2","V6","V8")]
+setnames(LINE1_pli,names(LINE1_pli),c("pos","pli","status"))
+
+SVA_pli <- fread("RawData/SVA.pli.acc.txt")
+SVA_pli <- SVA_pli[,c("V2","V6","V8")]
+setnames(SVA_pli,names(SVA_pli),c("pos","pli","status"))
+
+## Remove MEIs without a pLI score.
+## This is due to either not being in a gene or the gene not having a pLI score.
+ALU_pli[,status:=NULL]
+LINE1_pli[,status:=NULL]
+SVA_pli[,status:=NULL]
+
+##From below we do the sing.prop stuff
+##Import all files
+##Generated by (obviously change for MEI type):
+
+ALU_exon <- fread("RawData/ALU.exon.frq")
+ALU_intron <- fread("RawData/ALU.intron.frq")
+LINE1_exon <- fread("RawData/LINE1.exon.frq")
+LINE1_intron <- fread("RawData/LINE1.intron.frq")
+SVA_exon <- fread("RawData/SVA.exon.frq")
+SVA_intron <- fread("RawData/SVA.intron.frq")
+
+## Convert to a data.table that quantifies allele counts
+split_freq <- function(to.split,ap) {
+  v<-strsplit(to.split,":",fixed=TRUE)
+  x<-round(as.numeric(v[[1]][4])*as.numeric(ap))
+  if(x > 25) {
+    return(25)
+  } else {
+    return(x)
+  }
+}
+ALU_exon[,ac:=split_freq(V6,V4),by=1:nrow(ALU_exon)]
+ALU_exon <- ALU_exon[,c("V2","ac")]
+setnames(ALU_exon,"V2","pos")
+ALU_intron[,ac:=split_freq(V6,V4),by=1:nrow(ALU_intron)]
+ALU_intron <- ALU_intron[,c("V2","ac")]
+setnames(ALU_intron,"V2","pos")
+
+LINE1_exon[,ac:=split_freq(V6,V4),by=1:nrow(LINE1_exon)]
+LINE1_exon <- LINE1_exon[,c("V2","ac")]
+setnames(LINE1_exon,"V2","pos")
+LINE1_intron[,ac:=split_freq(V6,V4),by=1:nrow(LINE1_intron)]
+LINE1_intron <- LINE1_intron[,c("V2","ac")]
+setnames(LINE1_intron,"V2","pos")
+
+SVA_exon[,ac:=split_freq(V6,V4),by=1:nrow(SVA_exon)]
+SVA_exon <- SVA_exon[,c("V2","ac")]
+setnames(SVA_exon,"V2","pos")
+SVA_intron[,ac:=split_freq(V6,V4),by=1:nrow(SVA_intron)]
+SVA_intron <- SVA_intron[,c("V2","ac")]
+setnames(SVA_intron,"V2","pos")
+
+##Add pLI information
+ALU_exon<-merge(ALU_exon,ALU_pli,by="pos",all.x = T, all.y=F)
+ALU_intron<-merge(ALU_intron,ALU_pli,by="pos",all.x = T, all.y=F)
+LINE1_exon<-merge(LINE1_exon,LINE1_pli,by="pos",all.x = T, all.y=F)
+LINE1_intron<-merge(LINE1_intron,LINE1_pli,by="pos",all.x = T, all.y=F)
+SVA_exon<-merge(SVA_exon,SVA_pli,by="pos",all.x = T, all.y=F)
+SVA_intron<-merge(SVA_intron,SVA_pli,by="pos",all.x = T, all.y=F)
+
+mei.exon.prop <- (nrow(ALU_exon[ac==1]) + nrow(LINE1_exon[ac==1]) + nrow(SVA_exon[ac==1])) / (nrow(ALU_exon) + nrow(LINE1_exon) + nrow(SVA_exon))
+mei.exon.n <- sum(nrow(ALU_exon) + nrow(LINE1_exon) + nrow(SVA_exon))
+
+mei.intron.prop <- (nrow(ALU_intron[ac==1]) + nrow(LINE1_intron[ac==1]) + nrow(SVA_intron[ac==1])) / (nrow(ALU_intron) + nrow(LINE1_intron) + nrow(SVA_intron))
+mei.intron.n <- sum(nrow(ALU_intron) + nrow(LINE1_intron) + nrow(SVA_intron))
+
+##Raw numbers for SNV values are produced by the following protocol (all data are included in /lustre/scratch115/projects/ddd/users/eg15/SNV_constraint/):
+SNV.constraint <- fread("RawData/results.unaffected.txt")
+setnames(SNV.constraint,names(SNV.constraint),c("sing.syn","pli.syn","all.syn","sing.mis","pli.mis","all.mis","sing.stop","pli.stop","all.stop","sing.splice","pli.splice","all.splice"))
+
+sing.prop.syn<-sum(SNV.constraint[,sing.syn])/sum(SNV.constraint[,all.syn])
+sing.prop.mis<-sum(SNV.constraint[,sing.mis])/sum(SNV.constraint[,all.mis])
+sing.prop.stop<-sum(SNV.constraint[,sing.stop])/sum(SNV.constraint[,all.stop])
+sing.prop.splice<-sum(SNV.constraint[,sing.splice])/sum(SNV.constraint[,all.splice])
+
+pli.prop.syn<-sum(SNV.constraint[,pli.syn])/sum(SNV.constraint[,all.syn])
+pli.prop.mis<-sum(SNV.constraint[,pli.mis])/sum(SNV.constraint[,all.mis])
+pli.prop.stop<-sum(SNV.constraint[,pli.stop])/sum(SNV.constraint[,all.stop])
+pli.prop.splice<-sum(SNV.constraint[,pli.splice])/sum(SNV.constraint[,all.splice])
+
+sing.prop <- data.frame(mei=c("Alu","Alu","MEI","MEI","SNV","SNV","SNV","SNV"),
+                        compartment=c(rep(c("Exonic","Intronic"),2),"Nonsense","Missense","Synonymous","Splice"),
+                        prop=c((nrow(ALU_exon[ac==1])/nrow(ALU_exon)),(nrow(ALU_intron[ac==1])/nrow(ALU_intron)),
+                               mei.exon.prop, mei.intron.prop,sing.prop.stop,sing.prop.mis,sing.prop.syn,sing.prop.splice),
+                        n=c(nrow(ALU_exon),nrow(ALU_intron),mei.exon.n,mei.intron.n,sum(SNV.constraint[,all.stop]),sum(SNV.constraint[,all.mis]),sum(SNV.constraint[,all.syn]),sum(SNV.constraint[,all.splice])))
+
+##Calculate CIs
+sing.prop$lower <- sing.prop$prop - ci.func(sing.prop$prop,sing.prop$n)
+sing.prop$upper <- sing.prop$prop + ci.func(sing.prop$prop,sing.prop$n)
+
+##Drop LINE-1 and SVA due to low N (still represented in the 'MEI' category)
+MEI_pli <- data.table(variant=c("Exonic","Intronic","Exonic","Intronic","Nonsense","Missense","Synonymous","Splice"),
+                      prop=c(nrow(ALU_exon[as.numeric(pli)>0.9])/nrow(ALU_exon),
+                             nrow(ALU_intron[as.numeric(pli)>0.9])/nrow(ALU_intron),
+                             (nrow(ALU_exon[as.numeric(pli)>0.9])+nrow(LINE1_exon[as.numeric(pli)>0.9])+nrow(SVA_exon[as.numeric(pli)>0.9]))/(nrow(ALU_exon)+nrow(LINE1_exon)+nrow(SVA_exon)),
+                             (nrow(ALU_intron[as.numeric(pli)>0.9])+nrow(LINE1_intron[as.numeric(pli)>0.9])+nrow(SVA_intron[as.numeric(pli)>0.9]))/(nrow(ALU_intron)+nrow(LINE1_intron)+nrow(SVA_intron)),
+                             pli.prop.stop,pli.prop.mis,pli.prop.syn,pli.prop.splice),
+                      N=c(nrow(ALU_exon),
+                          nrow(ALU_intron),
+                          (nrow(ALU_exon)+nrow(LINE1_exon)+nrow(SVA_exon)),
+                          (nrow(ALU_intron)+nrow(LINE1_intron)+nrow(SVA_intron)),
+                          sum(SNV.constraint[,all.stop]),
+                          sum(SNV.constraint[,all.mis]),
+                          sum(SNV.constraint[,all.syn]),
+                          sum(SNV.constraint[,all.splice])),
+                      type=c("Alu","Alu","MEI","MEI","SNV","SNV","SNV","SNV")
+)
+MEI_pli[,lower:=prop-ci.func(prop,N)]
+MEI_pli[,upper:=prop+ci.func(prop,N)]
+
+##Merge the two.
+sing.prop<-data.table(sing.prop)
+merged<-merge(MEI_pli,sing.prop,by.y= c("compartment","mei"),by.x=c("variant","type"))
+setnames(merged,names(merged),c("variant","type","pli.prop","N.pli","pli.prop.lower","pli.prop.upper","sing.prop","N.sing","sing.prop.lower","sing.prop.upper"))
+merged[,text:=apply(merged,1,function(x){y<-as.numeric(x[10]); if (x[1] == "Intronic" && x[2] == "Alu") {y+0.03} else {y+0.02}})]
+merged[,type2:=factor(merged$type,levels=c("MEI","Alu","SNV"))]
+
+setkey(merged,variant)
+
+test<-data.table(x=c(0.1,0.11),y=c(0.73,0.748))
+
+plot.constraint <- ggplot(merged[c("Nonsense","Synonymous","Missense","Splice","Exonic", "Intronic")],aes(pli.prop,sing.prop,colour=type2)) +
+  scale_color_manual(values=cPalette,guide=guide_legend(title="Variant Class")) +
+  geom_errorbar(aes(ymin=sing.prop.lower,ymax=sing.prop.upper,width=0.00,colour=type2),size=1) +
+  geom_errorbarh(aes(xmin=pli.prop.lower,xmax=pli.prop.upper,height=0.00,colour=type2),size=1) + 
+  geom_point(size=6,shape=18) +
+  xlab("Proportion of Sites in High (>0.90) pLI Genes") +
+  ylab("Proportion of Singleton Sites") +
+  geom_text(inherit.aes=F,aes(pli.prop,text,label=variant,colour=type2),fontface="bold",size=3.5) +
+  theme
+
+plot.constraint
+```
+
+# Draw Figure 2
+
+This blob simply arranges the plots from above into one document using cowplot.
+
+**note** the resulting plot needs fairly extensive cleaning in AI to make the figure as shown in the manuscript. Mostly:
+
+* Changing the "order" of the CI bars and points
+* Adding in custom figure legends
+* Moving the names of the various variant categories to more readable places
+* Adding lines to Nonsense and Splice site variants to connect to label
+
+```{r fig.height=8, fig.width=5, message=FALSE, warning=FALSE}
+figure2 <- plot_grid(plot.compartment,plot.constraint,ncol=1,nrow=2,align = 'vh', rel_heights = c(2.5,4), labels = c("a","b"))
+figure2
+```
+
