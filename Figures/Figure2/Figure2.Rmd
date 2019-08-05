@@ -3,15 +3,16 @@ title: "Figure 2"
 output: html_document
 ---
 
-* This code makes all input figures for Figure 2 of Gardner et. al. Controbution of Retrotransposition to Developmental Disorders (2018)
+* This code makes all input figures for Figure 2 of Gardner et. al. Controbution of Retrotransposition to Developmental Disorders (2019)
 * All Figures need some cleaning up and processing in Illustrator
-* All files/code are located in: `/Users/eg15/Documents/Current Projects/DDD/Manuscript/Figures/Figure2/`
 
 Load all libraries necessary for this notebook to work and setup basic stuff:
 
 * libraries
 * default graphpad-like theme
 * function for calculating confidence intervals
+* Default MEI color palette
+
 ```{r setup, include=FALSE,warning = FALSE, message = FALSE}
 
 ##Libraries

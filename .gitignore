@@ -3,6 +3,6 @@
 .Rhistory
 .RData
 .Ruserdata
-Figures/Figure1/RawData/SNV.frq
-Figures/Supplement/RawData/genodepth.di.txt
-Figures/Supplement/RawData/GTEx.expr.txt
+SNV.frq
+genodepth.di.txt
+GTEx.expr.txt

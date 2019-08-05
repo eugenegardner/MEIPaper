@@ -3,7 +3,7 @@ title: "MEI Mutation Rate, Enrichment, and Figure 4"
 output: html_document
 ---
 
-* This code makes all input figures for Figure 4 of Gardner et. al. Controbution of Retrotransposition to Developmental Disorders (2018)
+* This code makes all input figures for Figure 4 of Gardner et. al. Controbution of Retrotransposition to Developmental Disorders (2019)
 * All Figures need some cleaning up and processing in Illustrator
 * All files/code are located in: `/Users/eg15/Documents/Current Projects/DDD/Manuscript/Figures/Figure2/`
 
