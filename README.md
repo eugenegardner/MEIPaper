@@ -20,7 +20,7 @@ tar -zxvf ./Figures/Figure1/RawData/SNV.frq.tar.gz
 
 And load the included `MEIPaper.Rproj` file in the top-level directory into Rstudio via `File -> Open Project`.
 
-You can then open the individual `\*.Rmd` notebooks in each of the individual "Figure" folders.
+You can then open the individual `*.Rmd` notebooks in each of the individual "Figure" folders.
 
 For any questions please open a new github issue.
 
