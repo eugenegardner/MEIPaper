@@ -26,4 +26,4 @@ For any questions please open a new github issue.
 
 ## To Cite:
 
-Gardner E. J., Prigmore E., Gallone G., Danecek P., Samocha K. E., Handsaker J., Gerety S. S., Ironfield H., Short P. J., Sifrim A., et al. (2019). Contribution of retrotransposition to developmental disorders. Nature communications 10, 4630. PMID: 31604926
+Gardner et. al., [Contribution of Retrotransposition to Developmental Disorders](http://dx.doi.org/10.1038/s41467-019-12520-y), _Nature Communications_, 2019
